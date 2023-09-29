@@ -15,12 +15,13 @@ v1.2.0: AT_CHECK -> TORCH_CHECK
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>  // at::cuda::getApplyGrid
-#include <THC/THC.h>
+//#include <THC/THC.h>
 
-#define CHECK_CUDA(x) AT_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
-#define CHECK_CONTIGUOUS(x) AT_CHECK(x.is_contiguous(), #x " must be contiguous")
+//#define CHECK_CUDA(x) AT_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
+#define CHECK_CUDA(x) TORCH_CHECK(x.is_cuda(), #x " must be a CUDA tensor")
+//#define CHECK_CONTIGUOUS(x) AT_CHECK(x.is_contiguous(), #x " must be contiguous")
+#define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
-
 
 /********************************
 * Forward kernel for chamfer distance
@@ -120,9 +121,15 @@ std::vector<at::Tensor> ChamferForward(
   const auto n1 = xyz1.size(1);
   const auto n2 = xyz2.size(1);
 
-  CHECK_EQ(xyz2.size(0), batch_size);
-  CHECK_EQ(xyz1.size(2), 3);
-  CHECK_EQ(xyz2.size(2), 3);
+  //CHECK_EQ(xyz2.size(0), batch_size); //RMP
+  TORCH_CHECK(xyz2.size(0)==batch_size,"xyz2.size(0) and batch_size must be equal") //RMP
+  
+  //CHECK_EQ(xyz1.size(2), 3); //RMP
+  TORCH_CHECK(xyz1.size(2)==3,"xyz2.size(0) must be equal 3") //RMP  
+  
+  //CHECK_EQ(xyz2.size(2), 3); //RMP
+  TORCH_CHECK(xyz2.size(2)==3,"xyz2.size(2) must be equal 3") //RMP  
+  
   CHECK_INPUT(xyz1);
   CHECK_INPUT(xyz2);
 
@@ -145,13 +152,14 @@ std::vector<at::Tensor> ChamferForward(
   AT_DISPATCH_FLOATING_TYPES(xyz1.scalar_type(), "ChamferForward", ([&] {
     ChamferForwardKernel<scalar_t, int64_t, BLOCK_SIZE>
       <<<grid1, BLOCK_SIZE>>>(
-        xyz1.data<scalar_t>(),
-        xyz2.data<scalar_t>(),
-        dist1.data<scalar_t>(),
-        idx1.data<int64_t>(),
+        xyz1.data_ptr<scalar_t>(), //xyz1.data<scalar_t>(), 
+        xyz2.data_ptr<scalar_t>(), //xyz2.data<scalar_t>(),
+        dist1.data_ptr<scalar_t>(), //dist1.data<scalar_t>(),
+        idx1.data_ptr<int64_t>(), //idx1.data<int64_t>(),
         batch_size, n1, n2);
     }));
-  THCudaCheck(cudaGetLastError());
+  //THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   AT_DISPATCH_FLOATING_TYPES(xyz2.scalar_type(), "ChamferForward", ([&] {
     ChamferForwardKernel<scalar_t, int64_t, BLOCK_SIZE>
@@ -162,7 +170,8 @@ std::vector<at::Tensor> ChamferForward(
         idx2.data<int64_t>(),
         batch_size, n2, n1);
     }));
-  THCudaCheck(cudaGetLastError());
+  //THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return std::vector<at::Tensor>({dist1, idx1, dist2, idx2});
 }
@@ -231,17 +240,40 @@ std::vector<at::Tensor> ChamferBackward(
   const auto batch_size = grad_dist1.size(0);
   const auto n1 = grad_dist1.size(1);
   const auto n2 = grad_dist2.size(1);
-  CHECK_EQ(grad_dist2.size(0), batch_size);
-  CHECK_EQ(xyz1.size(0), batch_size);
-  CHECK_EQ(xyz2.size(0), batch_size);
-  CHECK_EQ(xyz1.size(1), n1);
-  CHECK_EQ(xyz2.size(1), n2);
-  CHECK_EQ(xyz1.size(2), 3);
-  CHECK_EQ(xyz2.size(2), 3);
-  CHECK_EQ(idx1.size(0), batch_size);
-  CHECK_EQ(idx2.size(0), batch_size);
-  CHECK_EQ(idx1.size(1), n1);
-  CHECK_EQ(idx2.size(1), n2);
+  
+  //CHECK_EQ(grad_dist2.size(0), batch_size);
+  TORCH_CHECK(grad_dist2.size(0)==batch_size,"grad_dist2.size(0) and batch_size must be equal") //RMP
+  
+  //CHECK_EQ(xyz1.size(0), batch_size);
+  TORCH_CHECK(xyz1.size(0)==batch_size,"xyz2.size(0) and batch_size must be equal") //RMP
+  
+  //CHECK_EQ(xyz2.size(0), batch_size);
+  TORCH_CHECK(xyz2.size(0)==batch_size,"xyz2.size(0) and batch_size must be equal") //RMP
+  
+  //CHECK_EQ(xyz1.size(1), n1);
+  TORCH_CHECK(xyz1.size(1)==n1,"xyz1.size(1) and n1 must be equal") //RMP
+
+  //CHECK_EQ(xyz2.size(1), n2);
+  TORCH_CHECK(xyz2.size(1)==n2,"xyz2.size(1) and n2 must be equal") //RMP
+  
+  //CHECK_EQ(xyz1.size(2), 3);
+  TORCH_CHECK(xyz1.size(2)==3,"xyz1.size(2) and 3 must be equal") //RMP
+  
+  //CHECK_EQ(xyz2.size(2), 3);
+  TORCH_CHECK(xyz2.size(2)==3,"xyz2.size(0) and 3 must be equal") //RMP
+  
+  //CHECK_EQ(idx1.size(0), batch_size);
+  TORCH_CHECK(idx1.size(0)==batch_size,"idx1.size(0) and batch_size must be equal") //RMP
+  
+  //CHECK_EQ(idx2.size(0), batch_size);
+  TORCH_CHECK(idx2.size(0)==batch_size,"idx2.size(0) and batch_size must be equal") //RMP
+    
+  //CHECK_EQ(idx1.size(1), n1);
+  TORCH_CHECK(idx1.size(1)==n1,"idx1.size(1) and n1 must be equal") //RMP
+  
+  //CHECK_EQ(idx2.size(1), n2);
+  TORCH_CHECK(idx2.size(1)==n2,"idx2.size(1) and n2 must be equal") //RMP
+  
   CHECK_INPUT(grad_dist1);
   CHECK_INPUT(grad_dist2);
   CHECK_INPUT(xyz1);
@@ -256,9 +288,12 @@ std::vector<at::Tensor> ChamferBackward(
   dim3 grid1, grid2;
   const auto curDevice = at::cuda::current_device();
   // getApplyGrid: aten/src/ATen/cuda/CUDAApplyUtils.cuh
-  THArgCheck(at::cuda::getApplyGrid(batch_size * n1, grid1, curDevice), 1, "Too many elements to calculate");
-  THArgCheck(at::cuda::getApplyGrid(batch_size * n2, grid2, curDevice), 1, "Too many elements to calculate");
-
+  //THArgCheck(at::cuda::getApplyGrid(batch_size * n1, grid1, curDevice), 1, "Too many elements to calculate"); //RMP
+  TORCH_CHECK(at::cuda::getApplyGrid(batch_size * n1, grid1, curDevice), 1, "Too many elements to calculate"); //RMP
+  
+  //THArgCheck(at::cuda::getApplyGrid(batch_size * n2, grid2, curDevice), 1, "Too many elements to calculate"); //RMP
+  TORCH_CHECK(at::cuda::getApplyGrid(batch_size * n1, grid1, curDevice), 1, "Too many elements to calculate"); //RMP
+  
   AT_DISPATCH_FLOATING_TYPES(grad_dist1.scalar_type(), "ChamferBackward", ([&] {
     ChamferBackwardKernel<scalar_t, int64_t>
       <<<grid1, block>>>(
@@ -270,7 +305,8 @@ std::vector<at::Tensor> ChamferBackward(
         grad_xyz2.data<scalar_t>(),
         batch_size, n1, n2);
   }));
-  THCudaCheck(cudaGetLastError());
+  //THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   AT_DISPATCH_FLOATING_TYPES(grad_dist2.scalar_type(), "ChamferBackward", ([&] {
     ChamferBackwardKernel<scalar_t, int64_t>
@@ -283,7 +319,8 @@ std::vector<at::Tensor> ChamferBackward(
         grad_xyz1.data<scalar_t>(),
         batch_size, n2, n1);
   }));
-  THCudaCheck(cudaGetLastError());
+  //THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return std::vector<at::Tensor>({grad_xyz1, grad_xyz2});
 }

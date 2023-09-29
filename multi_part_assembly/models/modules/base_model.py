@@ -1,7 +1,7 @@
 import torch
 import torch.optim as optim
 import pytorch_lightning as pl
-
+import logging #RMP
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
@@ -23,6 +23,9 @@ class BaseModel(pl.LightningModule):
         self.cfg = cfg
 
         self._setup()
+        self.validation_step_outputs = [] #RMP
+        self.is_training = False #RMP
+        self.test_step_outputs = [] #RMP
 
     def _setup(self):
         # basic settings
@@ -58,49 +61,57 @@ class BaseModel(pl.LightningModule):
         pass
 
     def training_step(self, data_dict, batch_idx, optimizer_idx=-1):
+        self.is_training = True #RMP
         loss_dict = self.forward_pass(
             data_dict, mode='train', optimizer_idx=optimizer_idx)
         return loss_dict['loss']
 
     def validation_step(self, data_dict, batch_idx):
+        self.is_training = False #RMP
         loss_dict = self.forward_pass(data_dict, mode='val', optimizer_idx=-1)
+        self.validation_step_outputs.append(loss_dict) #RMP
         return loss_dict
 
-    def validation_epoch_end(self, outputs):
+    #def validation_epoch_end(self, outputs): #RMP
+    def on_validation_epoch_end(self):        #RMP
         # avg_loss among all data
-        # we need to consider different batch_size
+        # we need to consider different batch_size    
+        logging.warning( "on val epoch end: validation_step_outputs: %s", str(self.validation_step_outputs))
         func = torch.tensor if \
-            isinstance(outputs[0]['batch_size'], int) else torch.stack
-        batch_sizes = func([output.pop('batch_size') for output in outputs
-                            ]).type_as(outputs[0]['loss'])  # [num_batches]
+            isinstance(self.validation_step_outputs[0]['batch_size'], int) else torch.stack
+        batch_sizes = func([output.pop('batch_size') for output in self.validation_step_outputs
+                            ]).type_as(self.validation_step_outputs[0]['loss'])  # [num_batches]
         losses = {
-            f'val/{k}': torch.stack([output[k] for output in outputs])
-            for k in outputs[0].keys()
+            f'val/{k}': torch.stack([output[k] for output in self.validation_step_outputs])
+            for k in self.validation_step_outputs[0].keys()
         }  # each is [num_batches], stacked avg loss in each batch
         avg_loss = {
             k: (v * batch_sizes).sum() / batch_sizes.sum()
             for k, v in losses.items()
         }
         self.log_dict(avg_loss, sync_dist=True)
+        self.validation_step_outputs.clear() #RMP
 
     def test_step(self, data_dict, batch_idx):
         loss_dict = self.forward_pass(data_dict, mode='test', optimizer_idx=-1)
+        self.test_step_outputs.append(loss_dict) #RMP
         return loss_dict
 
-    def test_epoch_end(self, outputs):
+    #def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self):        
         # avg_loss among all data
         # we need to consider different batch_size
-        if isinstance(outputs[0]['batch_size'], int):
+        if isinstance(self.test_step_outputs[0]['batch_size'], int):
             func_bs = torch.tensor
             func_loss = torch.stack
         else:
             func_bs = torch.cat
             func_loss = torch.cat
-        batch_sizes = func_bs([output.pop('batch_size') for output in outputs
-                               ]).type_as(outputs[0]['loss'])  # [num_batches]
+        batch_sizes = func_bs([output.pop('batch_size') for output in self.test_step_outputs
+                               ]).type_as(self.test_step_outputs[0]['loss'])  # [num_batches]
         losses = {
-            f'test/{k}': func_loss([output[k] for output in outputs])
-            for k in outputs[0].keys()
+            f'test/{k}': func_loss([output[k] for output in self.test_step_outputs])
+            for k in self.test_step_outputs[0].keys()
         }  # each is [num_batches], stacked avg loss in each batch
         avg_loss = {
             k: (v * batch_sizes).sum() / batch_sizes.sum()
@@ -109,6 +120,7 @@ class BaseModel(pl.LightningModule):
         print('; '.join([f'{k}: {v.item():.6f}' for k, v in avg_loss.items()]))
         # this is a hack to get results outside `Trainer.test()` function
         self.test_results = avg_loss
+        self.test_step_outputs.clear()  # free memory #RMP
 
     def forward_pass(self, data_dict, mode, optimizer_idx):
         """Forward pass: loss computation and logging.
@@ -135,7 +147,8 @@ class BaseModel(pl.LightningModule):
 
         # in training we log for every step
         if mode == 'train' and self.local_rank == 0:
-            log_dict = {f'{mode}/{k}': v.item() for k, v in loss_dict.items()}
+            #log_dict = {f'{mode}/{k}': v.item() for k, v in loss_dict.items()} #RMP
+            log_dict = {f'{mode}/{k}': v.item() if not isinstance(v, int) else v for k, v in loss_dict.items()} #RMP
             data_name = [
                 k for k in self.trainer.profiler.recorded_durations.keys()
                 if 'prepare_data' in k
@@ -381,8 +394,9 @@ class BaseModel(pl.LightningModule):
         }
 
         # log the batch_size for avg_loss computation
-        if not self.training:
-            loss_dict['batch_size'] = B
+        #if not self.training:  #RMP
+        #if not self.is_training:     #RMP
+        loss_dict['batch_size'] = B
 
         return loss_dict
 
